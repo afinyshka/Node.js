@@ -1,11 +1,10 @@
 const express = require('express');
 const joi = require('joi');
-const fs = require('fs');
+const fs = require('fs').promises;
 const path = require('path');
 const pathToFile = path.join(__dirname, 'users.json');
 
 const app = express();
-
 const userSchema = joi.object({
     firstName: joi.string().min(1).required(),
     secondName: joi.string().min(1).required(),
@@ -15,9 +14,9 @@ const userSchema = joi.object({
 
 app.use(express.json());
 
-app.get('/users', (req, res) => {
+app.get('/users', async (req, res) => {
     try {
-        const usersData = JSON.parse(fs.readFileSync(pathToFile, 'utf-8'));
+        const usersData = await readUsersFromFile();
         res.send({ usersData });
     } catch (error) {
         console.error(error);
@@ -25,69 +24,87 @@ app.get('/users', (req, res) => {
     }
 });
 
-
-app.get('/users', (req, res) => {
-    const usersData = JSON.parse(fs.readFileSync(pathToFile, 'utf-8'));
-    res.send({ usersData });
-});
-
-app.get('/users/:id', (req, res) => {
-    const userId = +req.params.id;
-    const usersData = JSON.parse(fs.readFileSync(pathToFile, 'utf-8'));
-    const user = usersData.find(user => user.id === userId);
-    if (user) {
-        res.send({ user });
-    } else {
-        res.status(404);
-        res.send({ user: null });
+app.get('/users/:id', async (req, res) => {
+    try {
+        const usersData = await readUsersFromFile();
+        const userId = +req.params.id;
+        const user = usersData.find(user => user.id === userId);
+        if (user) {
+            res.send({ user });
+        } else {
+            res.status(404).send({ user: null });
+        }
+    } catch (error) {
+        console.error(error);
+        res.status(500).send({ error: 'Internal Server Error' });
     }
 });
 
-app.post('/users', (req, res) => {
-    const usersData = JSON.parse(fs.readFileSync(pathToFile, 'utf-8'));
-    uniqueID = usersData.length + 1;
-    usersData.push({
-        id: uniqueID,
-        ...req.body
-    })
-    fs.writeFileSync(pathToFile, JSON.stringify(usersData, null, 2));
-    res.send({ id: uniqueID });
-});
-app.put('/users/:id', (req, res) => {
-    const result = userSchema.validate(req.body);
-    if (result.error) {
-        return res.status(404).send({ error: result.error.details });
-    }
-    const userId = +req.params.id;
-    const usersData = JSON.parse(fs.readFileSync(pathToFile, 'utf-8'));
-    const user = usersData.find(user => user.id === userId);
-    if (user) {
-        const { firstName, secondName, age, city } = req.body;
-        user.firstName = firstName;
-        user.secondName = secondName;
-        user.age = age;
-        user.city = city;
-        res.send({ user });
-    } else {
-        res.status(404);
-        res.send({ user: null });
-    }
-});
-app.delete('/users/:id', (req, res) => {
-    const userId = +req.params.id;
-    const usersData = JSON.parse(fs.readFileSync(pathToFile, 'utf-8'));
-    const user = usersData.find(user => user.id === userId);
-    if (user) {
-        const userIndex = usersData.indexOf(user);
-        usersData.splice(userIndex, 1);
-        fs.writeFileSync(pathToFile, JSON.stringify(usersData, null, 2));
-        res.send({ user });
-    } else {
-        res.status(404);
-        res.send({ user: null });
+app.post('/users', async (req, res) => {
+    try {
+        const usersData = await readUsersFromFile();
+        const uniqueID = usersData.length + 1;
+        const newUser = { id: uniqueID, ...req.body };
+        usersData.push(newUser);
+        await writeUsersToFile(usersData);
+        res.send({ id: uniqueID });
+    } catch (error) {
+        console.error(error);
+        res.status(500).send({ error: 'Internal Server Error' });
     }
 });
 
-app.listen(3000, () => {
-    console.log('Server is running on http://localhost:3000');
+app.put('/users/:id', async (req, res) => {
+    try {
+        const result = userSchema.validate(req.body);
+        if (result.error) {
+            return res.status(400).send({ error: result.error.details });
+        }
+        const userId = +req.params.id;
+        let usersData = await readUsersFromFile();
+        const userIndex = usersData.findIndex(user => user.id === userId);
+        if (userIndex !== -1) {
+            const { firstName, secondName, age, city } = req.body;
+            usersData[userIndex] = { ...usersData[userIndex], firstName, secondName, age, city };
+            await writeUsersToFile(usersData);
+            res.send({ user: usersData[userIndex] });
+        } else {
+            res.status(404).send({ user: null });
+        }
+    } catch (error) {
+        console.error(error);
+        res.status(500).send({ error: 'Internal Server Error' });
+    }
+});
+
+app.delete('/users/:id', async (req, res) => {
+    try {
+        const userId = +req.params.id;
+        let usersData = await readUsersFromFile();
+        const userIndex = usersData.findIndex(user => user.id === userId);
+        if (userIndex !== -1) {
+            const deletedUser = usersData.splice(userIndex, 1)[0];
+            await writeUsersToFile(usersData);
+            res.send({ user: deletedUser });
+        } else {
+            res.status(404).send({ user: null });
+        }
+    } catch (error) {
+        console.error(error);
+        res.status(500).send({ error: 'Internal Server Error' });
+    }
+});
+
+async function readUsersFromFile() {
+    const data = await fs.readFile(pathToFile, 'utf-8');
+    return JSON.parse(data);
+}
+
+async function writeUsersToFile(users) {
+    await fs.writeFile(pathToFile, JSON.stringify(users, null, 2));
+}
+
+const PORT = 3000;
+app.listen(PORT, () => {
+    console.log(`Server is running on http://localhost:${PORT}`);
 });
